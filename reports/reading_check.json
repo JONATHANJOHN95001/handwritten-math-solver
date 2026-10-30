@@ -1,0 +1,166 @@
+{
+  "test_accuracy": 0.9066,
+  "digits_and_operators_with_letters_ruled_out": 0.9576,
+  "kinds": {
+    "Plain sums": {
+      "expressions": 300,
+      "read_exactly": 226
+    },
+    "Equations": {
+      "expressions": 200,
+      "read_exactly": 160,
+      "examples_of_misses": [
+        "9x+68=68 -> 9x768=68",
+        "8x+6=5 -> 8x+6.·=5",
+        "2x+98=23 -> 2x198=23",
+        "4x+14=83 -> 4x+÷4=93",
+        "8x-6=8 -> 8x-6=d",
+        "4x+38=63 -> 4x+]8=b3"
+      ]
+    },
+    "Powers": {
+      "expressions": 200,
+      "read_exactly": 182,
+      "examples_of_misses": [
+        "x^5 -> x^(5^-)",
+        "x^9 -> x^a",
+        "x^7 -> x^t",
+        "1^8 -> 7^8",
+        "7^8 -> 9^8",
+        "9^8 -> 1^8"
+      ]
+    },
+    "Functions (log, ln, sin, cos, tan)": {
+      "expressions": 200,
+      "read_exactly": 175,
+      "examples_of_misses": [
+        "log(7) -> 106(7)",
+        "tan(97) -> aan(97)",
+        "sin(41) -> sin(41.)",
+        "log(429) -> log(4-9)",
+        "sin(49) -> 5ln^e(49)",
+        "sin(x) -> 5ln·(x)"
+      ]
+    },
+    "Logs with a base": {
+      "expressions": 200,
+      "read_exactly": 153,
+      "examples_of_misses": [
+        "log_9(5) -> log_9(5^-)",
+        "log_4(7) -> log_9(7)",
+        "log_4(88) -> log_4(58)",
+        "log_1(5) -> log_÷(5)",
+        "log_3(1) -> log_3()1",
+        "log_8(6) -> log_8(1)"
+      ]
+    },
+    "Fractions": {
+      "expressions": 200,
+      "read_exactly": 173,
+      "examples_of_misses": [
+        "(5)/(65) -> (5^÷)/(65)",
+        "(7)/(14) -> (7)/(ln)",
+        "(52)/(1) -> (52)/(7)",
+        "(76)/(1) -> (76)/(÷)",
+        "(6)/(38) -> (6)/(36)",
+        "(26)/(4) -> (2b)/(4)"
+      ]
+    },
+    "Limits": {
+      "expressions": 200,
+      "read_exactly": 143,
+      "examples_of_misses": [
+        "lim_(x→2) x+7 -> 1×1-·n_2x+7",
+        "lim_(x→3) x+7 -> 1×1-52x+t",
+        "lim_(x→∞) x+9 -> 1x·ln-ax+9",
+        "lim_(x→9) x+1 -> lim_(x→8) x+1",
+        "lim_(x→1) x+7 -> lim_(x→÷) x+7",
+        "lim_(x→∞) x+3 -> lim_(x→∞) x+9"
+      ]
+    },
+    "Equations in other letters": {
+      "expressions": 200,
+      "read_exactly": 129,
+      "examples_of_misses": [
+        "6y+4=3 -> 4y+4=3",
+        "8t+2=27 -> 8++2=27",
+        "9t+3=2 -> 9k+3=2",
+        "1y+1=8 -> 7y+1=8",
+        "7t+2=18 -> 7++2=18",
+        "4y+2=43 -> 44+2=43"
+      ]
+    },
+    "Two lines of equations": {
+      "expressions": 200,
+      "read_exactly": 132,
+      "examples_of_misses": [
+        "x+y=3; x+y=8 -> x+4=3; x+y=8",
+        "x+y=4; x+y=4 -> x+x=4; x+y=4",
+        "x+y=3; x+y=7 -> x+y=3; x+y=7·",
+        "x+y=1; x+y=6 -> x+y=1; x+y=6.·",
+        "x+y=9; x+y=2 -> x+4=9; x+y=2",
+        "x+y=3; x+y=8 -> x+y=3; x7y=8"
+      ]
+    },
+    "Matrices with a word": {
+      "expressions": 200,
+      "read_exactly": 42,
+      "examples_of_misses": [
+        "rank[[1,6],[3,1]] -> rankb^6,]",
+        "rank[[7,2],[5,1]] -> rank6^2,]",
+        "rank[[1,3],[5,1]] -> rank6^(÷3),]",
+        "rank[[2,4],[2,4]] -> rankb_4^4]",
+        "rank[[2,6],[6,2]] -> rank6^6,]",
+        "rank[[5,8],[7,3]] -> rank5^b,]"
+      ]
+    },
+    "Integrals with limits": {
+      "expressions": 200,
+      "read_exactly": 115,
+      "examples_of_misses": [
+        "∫_(2)^(3) x^5dx -> ∫_(2)^(a) x^5dx",
+        "∫_(3)^(7) x^1dx -> ∫_(3)^(7) x^÷dx",
+        "∫_(9)^(1) x^7dx -> ∫_(9)^(÷) x^7dx",
+        "∫_(5)^(8) x^1dx -> ∫_(5)^(·) x^1dx",
+        "∫_(1)^(2) x^8dx -> ∫_(1)^(2) x·dx",
+        "∫_(1)^(6) x^9dx -> ∫_(÷)^(6) x^9dx"
+      ]
+    },
+    "dy/dx": {
+      "expressions": 200,
+      "read_exactly": 120,
+      "examples_of_misses": [
+        "(dy)/(dx)+y=3 -> (dy)/(1x)+4=3",
+        "(dy)/(dx)+y=9 -> (dy)/(1x)+y=9",
+        "(dy)/(dx)+y=5 -> (0y)/(dx)+y=5",
+        "(dy)/(dx)+y=2 -> (3y)/(dx)+y=2",
+        "(dy)/(dx)+y=5 -> (dy)/(dx)+y=-^-",
+        "(dy)/(dx)+y=3 -> (d4)/(dx)+8=3"
+      ]
+    },
+    "Factorials": {
+      "expressions": 200,
+      "read_exactly": 167,
+      "examples_of_misses": [
+        "8! -> 81",
+        "9! -> 1!",
+        "2! -> 21.",
+        "1! -> ÷!",
+        "3! -> 31",
+        "2! -> z!"
+      ]
+    },
+    "Combinations (nCr)": {
+      "expressions": 200,
+      "read_exactly": 156,
+      "examples_of_misses": [
+        "80c7 -> 00c7",
+        "81c2 -> 81cz",
+        "54c9 -> 5yc9",
+        "82c1 -> 8zc1",
+        "28c9 -> z8c9",
+        "58c5 -> 5bc5"
+      ]
+    }
+  }
+}

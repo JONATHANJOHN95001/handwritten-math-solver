@@ -1,0 +1,17 @@
+# The look: ink-blue on paper, amber kept for the answer, Plus Jakarta Sans for the interface, Noto Serif for headings.
+[theme]
+base = "light"
+primaryColor = "#1A365D"
+backgroundColor = "#F8F9FF"
+secondaryBackgroundColor = "#EFF4FF"
+textColor = "#0B1C30"
+borderColor = "#D3D8E2"
+baseRadius = "0.75rem"
+font = "'Plus Jakarta Sans':https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "'Noto Serif':https://fonts.googleapis.com/css2?family=Noto+Serif:wght@500;600;700&display=swap, serif"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"
+
+[browser]
+gatherUsageStats = false

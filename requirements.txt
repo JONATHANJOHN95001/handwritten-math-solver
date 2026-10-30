@@ -1,0 +1,11 @@
+tensorflow==2.21.0
+streamlit==1.66.1
+# 0.10+ moved to Streamlit components v2 and fails to import here; 0.9.3 is the classic release
+streamlit-drawable-canvas==0.9.3
+# contrib build: reader.normalize uses cv2.ximgproc.thinning
+opencv-contrib-python-headless==5.0.0.93
+numpy==2.4.6
+sympy==1.14.0
+# probability tables for the statistics methods and graph algorithms for the graph methods
+scipy==1.17.1
+networkx==3.6.1

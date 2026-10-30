@@ -1,0 +1,14 @@
+{
+  "test_accuracy": 0.9066,
+  "expression_accuracy": 0.7533,
+  "images": {
+    "BHMSDS": 25500,
+    "MNIST": 30000,
+    "EMNIST letters": 75000,
+    "drawn": 45000,
+    "train": 140400,
+    "validation": 17550,
+    "test": 17550
+  },
+  "epochs_run": 15
+}
