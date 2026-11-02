@@ -1,13 +1,11 @@
-"""Train the symbol CNN on MNIST digits, BHMSDS symbols, EMNIST letters and drawn brackets/arrows/∞,
+"""Train the symbol CNN on real handwriting (see prepare_handwriting.py) and a few symbols drawn by this script,
 then save the model, labels and report figures.
 
-Usage: python train.py --bhmsds <folder>/bhmsds/symbols --emnist <folder with emnist-letters-*.gz>
+Usage: python train.py --data <folder made by prepare_handwriting.py>
 """
 import argparse
-import gzip
 import json
 import pathlib
-import struct
 import sys
 
 import cv2
@@ -22,68 +20,17 @@ from sklearn.model_selection import train_test_split
 from layout import to_text
 from reader import normalize, segment
 
-# BHMSDS dot is unused: the reader spots dots by their size, which the CNN never sees. The letters are the whole
-# alphabet from EMNIST, with w, y and z also from BHMSDS; x comes from BHMSDS and the drawn curly x.
+# No dot or = here: the reader knows them by their shape, which the CNN never sees. x is apart from the letters as it is × too.
 LETTERS = list("abcdefghijklmnopqrstuvwyz")
 DRAWN = ["lparen", "rparen", "arrow", "inf", "integral", "sqrt", "pi", "lbracket", "rbracket", "partial", "fact",
-         "lambda", "mu", "theta"]  # no free dataset has these, so train.py draws them
+         "lambda", "mu", "theta"]  # also drawn by this script, so that the plain textbook form is always among the real ones
 CLASSES = [str(d) for d in range(10)] + ["plus", "minus", "x", "slash"] + LETTERS + DRAWN
 SHOWN = {"plus": "+", "minus": "−", "slash": "÷ (/)", "lparen": "(", "rparen": ")", "arrow": "→", "inf": "∞", "integral": "∫",
          "sqrt": "√", "pi": "π", "lbracket": "[", "rbracket": "]", "partial": "∂", "fact": "!", "lambda": "λ", "mu": "μ", "theta": "θ"}
-MNIST_PER_DIGIT = 3000
-PER_LETTER = 3000
-PER_DRAWN = 3000
+REAL = {"BHMSDS": "bhmsds", "EMNIST ByClass": "emnist", "HASYv2": "hasy", "MathWriting+": "plus"}  # names in the cache
+PER_DRAWN = 500
 SEED = 7
 HERE = pathlib.Path(__file__).parent
-
-
-def binarize(gray):
-    """Grayscale image -> 255 ink on 0, whatever the original polarity."""
-    if gray.mean() > 127:  # dark ink on light paper
-        gray = 255 - gray
-    return np.where(gray > 127, 255, 0).astype(np.uint8)
-
-
-def load_bhmsds(folder):
-    images, labels = [], []
-    for path in sorted(pathlib.Path(folder).glob("*.png")):
-        name = path.stem.rsplit("-", 1)[0]
-        if name in CLASSES:
-            mask = binarize(cv2.imread(str(path), cv2.IMREAD_GRAYSCALE))
-            if mask.any():
-                images.append(normalize(mask))
-                labels.append(CLASSES.index(name))
-    return np.array(images), np.array(labels)
-
-
-def load_mnist():
-    (x1, y1), (x2, y2) = tf.keras.datasets.mnist.load_data()
-    x, y = np.concatenate([x1, x2]), np.concatenate([y1, y2])
-    rng = np.random.default_rng(SEED)
-    keep = np.concatenate([rng.choice(np.flatnonzero(y == d), MNIST_PER_DIGIT, replace=False) for d in range(10)])
-    return np.array([normalize(binarize(img)) for img in x[keep]]), y[keep]
-
-
-def _read_idx(path):
-    """Images or labels from an EMNIST .gz file in the MNIST idx format."""
-    with gzip.open(path, "rb") as f:
-        data = f.read()
-    dims = data[3]
-    shape = struct.unpack(">" + "I" * dims, data[4:4 + 4 * dims])
-    return np.frombuffer(data, np.uint8, offset=4 + 4 * dims).reshape(shape)
-
-
-def load_emnist_letters(folder):
-    folder = pathlib.Path(folder)
-    images = np.concatenate([_read_idx(folder / f"emnist-letters-{s}-images-idx3-ubyte.gz") for s in ("train", "test")])
-    labels = np.concatenate([_read_idx(folder / f"emnist-letters-{s}-labels-idx1-ubyte.gz") for s in ("train", "test")])
-    rng = np.random.default_rng(SEED)
-    xs, ys = [], []
-    for letter in LETTERS:  # EMNIST labels a-z as 1-26, upper and lower case together
-        pick = rng.choice(np.flatnonzero(labels == ord(letter) - ord("a") + 1), PER_LETTER, replace=False)
-        xs += [normalize(binarize(img.T)) for img in images[pick]]  # EMNIST stores images transposed
-        ys += [CLASSES.index(letter)] * PER_LETTER
-    return np.array(xs), np.array(ys)
 
 
 def _arc(cx, cy, rx, ry, start, end):
@@ -165,21 +112,39 @@ def draw_symbol(name, rng):
 def load_drawn():
     rng = np.random.default_rng(SEED)
     xs, ys = [], []
-    for name, count in [(n, PER_DRAWN) for n in DRAWN] + [("x", PER_DRAWN // 2), ("slash", PER_DRAWN // 2)]:
-        xs += [normalize(draw_symbol(name, rng)) for _ in range(count)]
+    for name, count in [(n, PER_DRAWN) for n in DRAWN] + [("x", PER_DRAWN), ("slash", PER_DRAWN)]:
+        xs += [np.rint(normalize(draw_symbol(name, rng)) * 255).astype(np.uint8) for _ in range(count)]
         ys += [CLASSES.index(name)] * count
     return np.array(xs), np.array(ys)
 
 
-def load_split(bhmsds, emnist):
-    """All images, split 80/10/10 into train, validation and test (same split on every run)."""
-    sources = {"BHMSDS": load_bhmsds(bhmsds), "MNIST": load_mnist(),
-               "EMNIST letters": load_emnist_letters(emnist), "drawn": load_drawn()}
-    x = np.concatenate([xs for xs, _ in sources.values()])
-    y = np.concatenate([ys for _, ys in sources.values()])
-    x_train, x_rest, y_train, y_rest = train_test_split(x, y, test_size=0.2, stratify=y, random_state=SEED)
-    x_val, x_test, y_val, y_test = train_test_split(x_rest, y_rest, test_size=0.5, stratify=y_rest, random_state=SEED)
-    return sources, (x_train, y_train), (x_val, y_val), (x_test, y_test)
+def load_test(data):
+    """The test images, scaled 0-1. Real handwriting only: a score on this script's own drawings says nothing about handwriting."""
+    with np.load(pathlib.Path(data) / "symbols.npz") as cache:
+        x = np.concatenate([cache[f"{key}_test_x"] for key in REAL.values()])
+        y = np.concatenate([cache[f"{key}_test_y"] for key in REAL.values()])
+    return x.astype(np.float32) / 255, y
+
+
+def load_split(data):
+    """Each source's own training images, one tenth of them kept for validation, unless the source has a validation split."""
+    trains, vals, sources = [], [], {}
+    with np.load(pathlib.Path(data) / "symbols.npz") as cache:
+        for name, key in REAL.items():
+            x, y = cache[f"{key}_train_x"], cache[f"{key}_train_y"]
+            sources[name] = (x, y)
+            if f"{key}_val_x" in cache:
+                trains.append((x, y))
+                vals.append((cache[f"{key}_val_x"], cache[f"{key}_val_y"]))
+            else:
+                x_train, x_val, y_train, y_val = train_test_split(x, y, test_size=0.1, stratify=y, random_state=SEED)
+                trains.append((x_train, y_train))
+                vals.append((x_val, y_val))
+    sources["drawn"] = load_drawn()
+    trains.append(sources["drawn"])
+    x_train, y_train = (np.concatenate(parts) for parts in zip(*trains))
+    x_val, y_val = (np.concatenate(parts) for parts in zip(*vals))
+    return sources, (x_train, y_train), (x_val.astype(np.float32) / 255, y_val), load_test(data)
 
 
 def build_model(n_classes):
@@ -268,23 +233,24 @@ def save_figures(history, model, x_test, y_test, pred, reports):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bhmsds", required=True, help="folder of BHMSDS symbol PNGs")
-    ap.add_argument("--emnist", required=True, help="folder with the emnist-letters-*.gz files")
+    ap.add_argument("--data", required=True, help="folder made by prepare_handwriting.py")
     ap.add_argument("--epochs", type=int, default=15)
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # the report prints − × ÷, which a Windows console cannot encode
     tf.keras.utils.set_random_seed(SEED)
 
-    sources, (x_train, y_train), (x_val, y_val), (x_test, y_test) = load_split(args.bhmsds, args.emnist)
-    print(", ".join(f"{len(ys)} {name}" for name, (_, ys) in sources.items()), f"images, {len(CLASSES)} classes")
+    sources, (x_train, y_train), (x_val, y_val), (x_test, y_test) = load_split(args.data)
+    print(", ".join(f"{len(ys)} {name}" for name, (_, ys) in sources.items()), f"images, {len(CLASSES)} classes", flush=True)
 
-    # No class weights: digits outnumber operators 3 to 1 here as in real sums, and balanced weights
-    # pushed every doubtful '1' over to '/'.
+    # No class weights: digits outnumber the rest here as in real sums, and balanced weights pushed every doubtful '1' over to '/'.
+    # Images stay as bytes until a batch needs them, as there are too many to hold as floats.
+    batches = (tf.data.Dataset.from_tensor_slices((x_train[..., None], y_train)).shuffle(len(y_train), seed=SEED).batch(128)
+               .map(lambda x, y: (tf.cast(x, tf.float32) / 255, y), num_parallel_calls=tf.data.AUTOTUNE).prefetch(tf.data.AUTOTUNE))
     model = build_model(len(CLASSES))
     model.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
     history = model.fit(
-        x_train[..., None], y_train, validation_data=(x_val[..., None], y_val),
-        epochs=args.epochs, batch_size=128, verbose=2,
+        batches, validation_data=(x_val[..., None], y_val), validation_batch_size=256,
+        epochs=args.epochs, verbose=2,
         callbacks=[tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=1, min_lr=1e-5),
                    tf.keras.callbacks.EarlyStopping(monitor="val_accuracy", patience=4, restore_best_weights=True)])
 

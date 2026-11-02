@@ -3,12 +3,21 @@ import re
 
 import sympy as sp
 
+from matrices import determinant_lines
 from results import Result, decimal, parts_of, show, show_matrix, show_plain, time_limited
 from solver import X, read_equation, read_expression
+from working import explain_integral
 
 y_symbol, D = sp.Symbol("y"), sp.Symbol("D")
 T = sp.Symbol("t")
 VARIABLES = ("x", "y", "z", "t", "u", "v", "w", "r", "θ")
+ODE_KINDS = {"separable": "separable: put the y terms with dy and the other terms with the other differential, then integrate both sides",
+             "Bernoulli": "Bernoulli: substituting u = y^(1-n) makes it linear",
+             "1st_exact": "exact: it is the total differential of some function, which is set equal to a constant",
+             "1st_homogeneous_coeff_best": "homogeneous: substituting y = vx makes it separable",
+             "nth_linear_euler_eq_homogeneous": "Cauchy-Euler: trying y = x^m gives an equation for m",
+             "nth_linear_euler_eq_nonhomogeneous_variation_of_parameters": "Cauchy-Euler with a right side: y = x^m for the left side, then variation of parameters",
+             "nth_linear_constant_coeff_variation_of_parameters": "linear with constant coefficients: the particular part comes from variation of parameters"}
 
 
 # ---------- differential equations ----------
@@ -107,17 +116,72 @@ def _auxiliary(expression, unknown, var):
     return poly + coefficient, m
 
 
+def _ode_text(expression):
+    """y'' + 5y' + 6y for SymPy's Derivative(y(x), (x, 2)) + ..."""
+    text = show(expression)
+    text = re.sub(r"Derivative\(y\(\w+\), \(\w+, (\d)\)\)", lambda m: "y" + "'" * int(m[1]), text)
+    return re.sub(r"Derivative\(y\(\w+\), \w+\)", "y'", text).replace("y(x)", "y").replace("y(t)", "y")
+
+
+def _first_order_lines(expression, unknown, var):
+    """y' + P y = Q with the integrating factor, when the equation has that form."""
+    expanded = sp.expand(expression)
+    derivative = unknown.diff(var)
+    a, b = expanded.coeff(derivative), expanded.coeff(unknown)
+    q = sp.simplify(-(expanded - a * derivative - b * unknown))
+    if a == 0 or a.has(unknown) or b.has(unknown) or q.has(unknown):
+        return []
+    p_part, q_part = sp.simplify(b / a), sp.simplify(q / a)
+    factor = sp.simplify(sp.exp(sp.integrate(p_part, var)))
+    return [f"Divide by the number in front of y' to get y' + P·y = Q, with P = {show(p_part)} and Q = {show(q_part)}",
+            f"Integrating factor: e^(∫P d{var}) = {show(factor)}",
+            f"Multiply through by it, and the left side becomes the derivative of y × ({show(factor)})",
+            f"Integrate both sides: y × ({show(factor)}) = ∫({show(sp.simplify(q_part * factor))}) d{var} = {show(sp.integrate(sp.simplify(q_part * factor), var))} + C"]
+
+
+def _ode_method_lines(expression, unknown, var, order, auxiliary, conditions):
+    """How the solution is built up. It only explains, so anything it cannot explain is left out and the answer stands."""
+    lines = []
+    derivatives = expression.atoms(sp.Derivative)
+    right_side = sp.simplify(-expression.subs({d: 0 for d in derivatives}).subs(unknown, 0))
+    if auxiliary:
+        lines.append("Each root m gives a term e^(mx); a repeated root also gives x·e^(mx); a pair a ± bi gives e^(ax)(C1·cos(bx) + C2·sin(bx))")
+        general = sp.dsolve(expression, unknown).rhs
+        constants = general.free_symbols - expression.free_symbols - {var}
+        particular = general.subs(dict.fromkeys(constants, 0))
+        lines.append(f"Complementary function, from the roots: y_c = {show(sp.expand(general - particular))}")
+        if right_side != 0:
+            lines.append(f"The right side is {show(right_side)}. A trial solution of that form gives the particular integral: y_p = {show(particular)}")
+            lines.append(f"General solution: y = y_c + y_p = {show(general)}")
+    else:
+        hints = sp.classify_ode(expression, unknown)
+        if order == 1 and "1st_linear" in hints:
+            lines += _first_order_lines(expression, unknown, var)
+        kind = next((ODE_KINDS[hint] for hint in hints if hint in ODE_KINDS), None)
+        if kind and not lines:
+            lines.append(f"This kind of equation is {kind}")
+        lines.append(f"General solution: y = {show(sp.dsolve(expression, unknown).rhs)}")
+    if conditions:
+        lines.append("Put in the given values to fix the constants: " + ", ".join(f"{_ode_text(k)} = {show_plain(v)}" for k, v in conditions.items()))
+    return lines
+
+
 def solve_ode(text):
     parts = parts_of(text)
     expression, unknown, var = read_ode(parts[0])
     conditions = _initial_values(parts[1:], unknown, var)
     order, homogeneous = _classify(expression, unknown, var)
-    steps = [f"Order {order}, {'homogeneous' if homogeneous else 'non-homogeneous'}"]
+    steps = [f"With everything on one side: {_ode_text(expression)} = 0", f"Order {order}, {'homogeneous' if homogeneous else 'non-homogeneous'}"]
     auxiliary = _auxiliary(expression, unknown, var)
+    legendre = None if auxiliary else _legendre_form(expression, unknown, var)
+    if legendre:
+        inner = legendre[0] * var + legendre[1]
+        steps.append(f"The powers of {show(inner)} go with the order of each derivative, so this is a Cauchy-Legendre equation")
+        steps.append(f"Put u = {show(inner)}, so d/d{var} = {show_plain(legendre[0])}·d/du. This gives a Cauchy-Euler equation in u, which y = u^m solves")
     if auxiliary:
         poly, m = auxiliary
         roots = sp.roots(sp.Poly(poly, m))
-        steps.append(f"Auxiliary equation: {show(poly)} = 0")
+        steps.append(f"Auxiliary equation, with y' replaced by m and y'' by m^2: {show(poly)} = 0")
         if roots:
             steps.append("Roots: " + ", ".join(show_plain(r) for r, n in roots.items() for _ in range(n)))
 
@@ -128,6 +192,13 @@ def solve_ode(text):
 
     solution = time_limited(work, 40)
     solutions = solution if isinstance(solution, list) else [solution]
+    try:
+        if not legendre:
+            steps += time_limited(lambda: _ode_method_lines(expression, unknown, var, order, auxiliary, conditions), 15)
+    except Exception:  # the answer is already found, and SymPy can fail on the separate parts of an unusual equation
+        pass
+    if not (steps[-1].startswith("General solution") and steps[-1].endswith(show(solutions[0].rhs))):
+        steps.append("Solution: " + "; ".join(f"y = {show(s.rhs)}" for s in solutions))
     return Result("Differential equation", [f"y = {show(s.rhs)}" for s in solutions], steps)
 
 
@@ -145,7 +216,10 @@ def system_ode(matrix, forcing=None):
         particular = sp.exp(rate * T) * sp.integrate(sp.exp(-rate * T) * g[i], T)
         parts.append(constants[i] * sp.exp(rate * T) + particular)
     solution = (p * sp.Matrix(parts)).applyfunc(sp.simplify)
-    steps = [f"Eigenvalues: {', '.join(show_plain(v) for v, n in values for _ in range(n))}", f"P =\n{show_matrix(p)}", f"D =\n{show_matrix(d)}"]
+    steps = [f"Eigenvalues of the matrix A: {', '.join(show_plain(v) for v, n in values for _ in range(n))}", f"Eigenvectors in the columns of P:\n{show_matrix(p)}",
+             f"Eigenvalues on the diagonal of D:\n{show_matrix(d)}", "Put X = P·Y. Then Y' = D·Y + P⁻¹f, which is one simple equation for each Yi",
+             *[f"Y{i + 1}' = {show_plain(d[i, i])}·Y{i + 1} + {show(g[i])}, so Y{i + 1} = {show(parts[i])}" for i in range(matrix.rows)],
+             f"X = P·Y gives the solution:\n{show_matrix(solution)}"]
     real_parts = [sp.re(v) for v in matrix.eigenvals()]
     if all(r < 0 for r in real_parts):
         stability = "Stable: every eigenvalue has a negative real part"
@@ -171,14 +245,17 @@ def _function_body(text):
 def partials(text):
     body = _function_body(text)
     letters = _variables(body)
-    answer, steps = [], []
+    answer, first, second = [], [f"The function: {show(body)}"], []
     for v in letters:
         answer.append(f"∂/∂{v} = {show(sp.simplify(body.diff(v)))}")
+        others = [str(o) for o in letters if o != v]
+        held = f"treating {', '.join(others)} as {'a constant' if len(others) == 1 else 'constants'}: " if others else ""
+        first.append(f"∂/∂{v}, {held}{show(sp.simplify(body.diff(v)))}")
     for i, a in enumerate(letters):
         for b in letters[i:]:
             label = f"∂²/∂{a}²" if a == b else f"∂²/∂{a}∂{b}"
-            steps.append(f"{label} = {show(sp.simplify(body.diff(a, b)))}")
-    return Result("Partial derivatives", answer, ["Second order:"] + steps)
+            second.append(f"{label}, differentiating ∂/∂{a} by {b}: {show(sp.simplify(body.diff(a, b)))}")
+    return Result("Partial derivatives", answer, first + second)
 
 
 def total_derivative(text):
@@ -199,7 +276,10 @@ def total_derivative(text):
     if at:
         point = read_expression(at.split("=")[1])
         answer.append(f"At {var} = {show_plain(point)}: {show(sp.simplify(direct.subs(var, point)))}")
-    return Result("Total derivative", answer, ["The chain rule and direct substitution give the same result"])
+    steps = [f"Chain rule: d{name}/d{var} = " + " + ".join(f"(∂{name}/∂{k})(d{k}/d{var})" for k in inner)]
+    steps += [f"∂{name}/∂{k} = {show(body.diff(k))} and d{k}/d{var} = {show(v.diff(var))}" for k, v in inner.items()]
+    steps += [f"Multiply them, add them and write everything in {var}: {show(sp.simplify(direct))}", f"Check: putting {', '.join(map(str, inner))} into {name} first and then differentiating gives the same result"]
+    return Result("Total derivative", answer, steps)
 
 
 def implicit_derivative(body_text, constraint_text):
@@ -210,7 +290,10 @@ def implicit_derivative(body_text, constraint_text):
     constraint = left - right
     dydx = -constraint.diff(X) / constraint.diff(y)
     return Result("Total derivative with a constraint", [f"du/dx = {show(sp.simplify(body.diff(X) + body.diff(y) * dydx))}"],
-                  [f"dy/dx = {show(sp.simplify(dydx))}"])
+                  [f"Write the constraint as g = 0, with g = {show(constraint)}",
+                   f"Differentiating it: dy/dx = -(∂g/∂x) ÷ (∂g/∂y) = -({show(constraint.diff(X))}) ÷ ({show(constraint.diff(y))}) = {show(sp.simplify(dydx))}",
+                   f"du/dx = ∂u/∂x + (∂u/∂y)(dy/dx), with ∂u/∂x = {show(body.diff(X))} and ∂u/∂y = {show(body.diff(y))}",
+                   f"Put them together: {show(sp.simplify(body.diff(X) + body.diff(y) * dydx))}"])
 
 
 def jacobian(text, at=None):
@@ -226,7 +309,10 @@ def jacobian(text, at=None):
     if at is not None:
         point = dict(zip(letters, at))
         answer.append(f"At {tuple(at)}: J = {show(det.subs(point))}")
-    return Result("Jacobian", answer, [f"Jacobian matrix:\n{show_matrix(matrix)}"])
+    steps = [f"Differentiate each function by each variable, in rows and columns:\n{show_matrix(matrix)}", *determinant_lines(matrix), f"Simplify: J = {show(det)}"]
+    if at is not None:
+        steps.append(f"Put in the point {tuple(at)}: J = {show(det.subs(point))}")
+    return Result("Jacobian", answer, steps)
 
 
 def jacobian_product(text):
@@ -240,7 +326,11 @@ def jacobian_product(text):
     solved = sp.solve([f - o for f, o in zip(functions, outer)], inner, dict=True)[0]
     back = sp.Matrix([solved[v] for v in inner]).jacobian(outer).det()
     product = sp.simplify(forward * back.subs({o: f for o, f in zip(outer, functions)}))
-    return Result("Jacobian product", [f"J·J' = {show(product)}"], [f"J = {show(sp.simplify(forward))}", f"J' = {show(sp.simplify(back))}"])
+    return Result("Jacobian product", [f"J·J' = {show(product)}"], [
+        f"J from the given formulas:\n{show_matrix(sp.Matrix(functions).jacobian(inner))}", f"J = {show(sp.simplify(forward))}",
+        "Solve the formulas the other way round: " + ", ".join(f"{v} = {show(solved[v])}" for v in inner),
+        f"J' from those:\n{show_matrix(sp.Matrix([solved[v] for v in inner]).jacobian(outer))}", f"J' = {show(sp.simplify(back))}",
+        f"Multiply them, writing J' in the same letters as J: {show(product)}"])
 
 
 def extrema(text):
@@ -251,10 +341,15 @@ def extrema(text):
     positive = {c: sp.Symbol(c.name, positive=True) for c in constants}
     body = body.subs(positive)
     points = sp.solve([body.diff(v) for v in letters], letters, dict=True)
-    answer, steps = [], [f"∂/∂{v} = {show(body.diff(v))}" for v in letters]
+    answer, steps = [], [f"First derivatives: ∂/∂{v} = {show(body.diff(v))}" for v in letters]
     if len(letters) != 2:
         raise ValueError("This method handles functions of two variables")
     a, b = letters
+    real = [point for point in points if all(sp.im(v) == 0 for v in point.values())]
+    steps.append("Set both to 0 and solve them together. The real solutions are the stationary points: " + ("; ".join(
+        ", ".join(f"{k} = {show_plain(v)}" for k, v in point.items()) for point in real) or "there are none"))
+    steps.append(f"Second derivatives: r = ∂²/∂{a}² = {show(body.diff(a, a))}, s = ∂²/∂{a}∂{b} = {show(body.diff(a, b))}, t = ∂²/∂{b}² = {show(body.diff(b, b))}")
+    steps.append("At each point: rt - s² > 0 with r > 0 is a minimum, with r < 0 a maximum; rt - s² < 0 is a saddle point")
     for point in points:
         if not all(sp.im(v) == 0 for v in point.values()) or len(point) < 2:
             continue
@@ -271,7 +366,7 @@ def extrema(text):
         else:
             kind = "the test does not decide"
         answer.append(f"{place}: {kind}")
-        steps.append(f"At {place}: r = {show(r)}, s = {show(s)}, t = {show(t)}, rt - s² = {show(d)}")
+        steps.append(f"At {place}: r = {show(r)}, s = {show(s)}, t = {show(t)}, rt - s² = {show(d)}, which gives: {kind}")
     if not answer:
         answer = ["No real stationary point"]
     return Result("Maxima and minima", answer, steps)
@@ -300,7 +395,11 @@ def lagrange(objective_text, constraint_text, positive=False):
 
     answer = [f"Largest value {show_plain(sp.simplify(objective.subs(high)))} at {place(high)}",
               f"Smallest value {show_plain(sp.simplify(objective.subs(low)))} at {place(low)}"]
-    return Result("Lagrange multipliers", answer, [f"Stationary points found: {len(real)}"])
+    steps = [f"Write the constraint as g = 0, with g = {show(constraint)}", f"Form F = f - λg, with f = {show(objective)}",
+             *[f"∂F/∂{v} = 0: {show(equation)} = 0" for v, equation in zip(letters, equations)], "Solve these together with g = 0"]
+    steps += [f"Stationary point {place(point)}, where f = {show_plain(sp.simplify(objective.subs(point)))}" for point in ranked]
+    steps.append("Compare the values of f: the largest and the smallest are the answers")
+    return Result("Lagrange multipliers", answer, steps)
 
 
 # ---------- vector calculus ----------
@@ -337,6 +436,14 @@ def show_vector(vector):
     return " + ".join(pieces) if pieces else "0"
 
 
+def _curl_lines(vector):
+    x, y, z = XYZ
+    return ["curl v is the determinant of the rows (i, j, k), (∂/∂x, ∂/∂y, ∂/∂z) and (v1, v2, v3)",
+            f"i part: ∂v3/∂y - ∂v2/∂z = ({show(vector[2].diff(y))}) - ({show(vector[1].diff(z))}) = {show(sp.simplify(vector[2].diff(y) - vector[1].diff(z)))}",
+            f"j part: ∂v1/∂z - ∂v3/∂x = ({show(vector[0].diff(z))}) - ({show(vector[2].diff(x))}) = {show(sp.simplify(vector[0].diff(z) - vector[2].diff(x)))}",
+            f"k part: ∂v2/∂x - ∂v1/∂y = ({show(vector[1].diff(x))}) - ({show(vector[0].diff(y))}) = {show(sp.simplify(vector[1].diff(x) - vector[0].diff(y)))}"]
+
+
 def _operand(text):
     """A scalar in grad(...) nested inside div or curl: 'grad(x^3+y^3)' gives the gradient vector."""
     match = re.fullmatch(r"\s*(?:grad|∇)\s*\(?(.+?)\)?\s*", text)
@@ -347,25 +454,35 @@ def gradient(text, at=None):
     scalar = read_expression(text)
     vector = _grad(scalar)
     answer = [f"grad f = {show_vector(vector)}"]
+    steps = [f"grad f = (∂f/∂x)i + (∂f/∂y)j + (∂f/∂z)k, with f = {show(scalar)}"]
+    steps += [f"∂f/∂{v} = {show(entry)}" for v, entry in zip(XYZ, vector)]
     if at is not None:
         answer.append(f"At {tuple(at)}: {show_vector(vector.subs(dict(zip(XYZ, at))))}")
-    return Result("Gradient", answer, [])
+        steps.append(f"Put in the point {tuple(at)}: {show_vector(vector.subs(dict(zip(XYZ, at))))}")
+    return Result("Gradient", answer, steps)
 
 
 def divergence(text, at=None):
-    value = sp.simplify(_div(_operand(text)))
+    vector = _operand(text)
+    value = sp.simplify(_div(vector))
     answer = [f"div v = {show(value)}"]
+    steps = [f"v = {show_vector(vector)}, and div v = ∂v1/∂x + ∂v2/∂y + ∂v3/∂z"]
+    steps += [f"∂v{n + 1}/∂{XYZ[n]} = ∂({show(vector[n])})/∂{XYZ[n]} = {show(vector[n].diff(XYZ[n]))}" for n in range(3)]
+    steps.append(f"Add them: {show(value)}")
     if at is not None:
         answer.append(f"At {tuple(at)}: {show(value.subs(dict(zip(XYZ, at))))}")
-    return Result("Divergence", answer, [])
+        steps.append(f"Put in the point {tuple(at)}: {show(value.subs(dict(zip(XYZ, at))))}")
+    return Result("Divergence", answer, steps)
 
 
 def curl(text, times=1):
     vector = _operand(text)
+    steps = [f"v = {show_vector(vector)}"]
     for _ in range(times):
+        steps += _curl_lines(vector)
         vector = _curl(vector)
     label = "curl v" if times == 1 else "curl(curl v)"
-    return Result("Curl", [f"{label} = {show_vector(vector)}"], [])
+    return Result("Curl", [f"{label} = {show_vector(vector)}"], steps)
 
 
 def field_type(text):
@@ -373,20 +490,29 @@ def field_type(text):
     div, cur = sp.simplify(_div(vector)), _curl(vector).applyfunc(sp.simplify)
     answer = [f"div v = {show(div)}: {'solenoidal' if div == 0 else 'not solenoidal'}",
               f"curl v = {show_vector(cur)}: {'irrotational' if cur == sp.zeros(3, 1) else 'not irrotational'}"]
-    return Result("Solenoidal and irrotational", answer, [])
+    steps = [f"v = {show_vector(vector)}", "Solenoidal means div v = 0",
+             *[f"∂v{n + 1}/∂{XYZ[n]} = {show(vector[n].diff(XYZ[n]))}" for n in range(3)], f"Adding them, div v = {show(div)}",
+             "Irrotational means curl v = 0", *_curl_lines(vector)]
+    return Result("Solenoidal and irrotational", answer, steps)
 
 
 def potential(text):
     vector = _operand(text)
     cur = _curl(vector).applyfunc(sp.simplify)
+    steps = [f"F = {show_vector(vector)}. F is conservative exactly when curl F = 0", *_curl_lines(vector)]
     if cur != sp.zeros(3, 1):
-        return Result("Conservative field", [f"curl F = {show_vector(cur)}, so F is not conservative"], [])
+        return Result("Conservative field", [f"curl F = {show_vector(cur)}, so F is not conservative"], steps)
     x, y, z = XYZ
     phi = sp.integrate(vector[0], x)
-    phi += sp.integrate(sp.simplify(vector[1] - phi.diff(y)), y)
-    phi += sp.integrate(sp.simplify(vector[2] - phi.diff(z)), z)
-    return Result("Conservative field", ["curl F = 0, so F is conservative", f"φ = {show(sp.expand(phi))} + c"],
-                  ["Check: grad φ = F"])
+    steps.append(f"Integrate F1 by x: φ = {show(phi)} + a function of y and z")
+    extra = sp.integrate(sp.simplify(vector[1] - phi.diff(y)), y)
+    phi += extra
+    steps.append(f"∂φ/∂y must equal F2, which adds {show(extra)}: φ = {show(phi)} + a function of z")
+    extra = sp.integrate(sp.simplify(vector[2] - phi.diff(z)), z)
+    phi += extra
+    steps.append(f"∂φ/∂z must equal F3, which adds {show(extra)}: φ = {show(sp.expand(phi))} + c")
+    steps.append(f"Check: grad φ = {show_vector(_grad(phi))}, which is F")
+    return Result("Conservative field", ["curl F = 0, so F is conservative", f"φ = {show(sp.expand(phi))} + c"], steps)
 
 
 def directional(scalar_text, at, along_text):
@@ -395,7 +521,9 @@ def directional(scalar_text, at, along_text):
     gradient_there = _grad(scalar).subs(dict(zip(XYZ, at)))
     value = gradient_there.dot(direction) / direction.norm()
     return Result("Directional derivative", [f"Directional derivative = {show(sp.simplify(value))}"],
-                  [f"grad f at the point = {show_vector(gradient_there)}", f"|a| = {show(direction.norm())}"])
+                  [f"Find grad f: {show_vector(_grad(scalar))}", f"At the point {tuple(at)}: grad f = {show_vector(gradient_there)}",
+                   f"The direction a = {show_vector(direction)}, with size |a| = {show_plain(direction.norm())}",
+                   f"Directional derivative = (grad f · a) ÷ |a| = ({show_plain(gradient_there.dot(direction))}) ÷ {show_plain(direction.norm())} = {show(sp.simplify(value))}"])
 
 
 def motion(curve_text, at=None, along=None):
@@ -403,14 +531,17 @@ def motion(curve_text, at=None, along=None):
     r = read_vector(curve_text)
     velocity, acceleration = r.diff(T), r.diff(T, 2)
     answer = [f"Velocity = {show_vector(velocity)}", f"Acceleration = {show_vector(acceleration)}"]
-    steps = []
+    steps = [f"r = {show_vector(r)}", f"Velocity is dr/dt: {show_vector(velocity)}", f"Acceleration is dv/dt: {show_vector(acceleration)}"]
     if at is not None:
         v, a = velocity.subs(T, at), acceleration.subs(T, at)
         steps += [f"At t = {show_plain(at)}: v = {show_vector(v)}", f"At t = {show_plain(at)}: a = {show_vector(a)}"]
         answer += [f"At t = {show_plain(at)}: |v| = {show(sp.simplify(v.norm()))}, |a| = {show(sp.simplify(a.norm()))}"]
+        steps.append(f"Sizes, the square root of the sum of the squares: |v| = {show(sp.simplify(v.norm()))}, |a| = {show(sp.simplify(a.norm()))}")
         if along is not None:
             unit = read_vector(along)
-            unit = unit / unit.norm()
+            size = unit.norm()
+            unit = unit / size
+            steps.append(f"Divide the direction by its size, {show_plain(size)}, to get a unit vector n. A component is the dot product with n: v·n = {show(sp.simplify(v.dot(unit)))}, a·n = {show(sp.simplify(a.dot(unit)))}")
             answer += [f"Component of velocity along the direction = {show(sp.simplify(v.dot(unit)))}",
                        f"Component of acceleration along the direction = {show(sp.simplify(a.dot(unit)))}"]
     return Result("Velocity and acceleration", answer, steps)
@@ -422,12 +553,13 @@ def tangent(curve_text, times=()):
     velocity = r.diff(T)
     length = sp.sqrt(sum(entry ** 2 for entry in velocity))
     answer = [f"Unit tangent = ({show_vector(velocity)}) / {show(sp.simplify(length))}"]
-    steps = []
+    steps = [f"r = {show_vector(r)}", f"The tangent is dr/dt: {show_vector(velocity)}", f"Its size: {show(sp.simplify(length))}", "Divide the tangent by its size for the unit tangent"]
     if len(times) == 2:
         a, b = (velocity.subs(T, t) for t in times)
         cosine = sp.simplify(a.dot(b) / (a.norm() * b.norm()))
         answer.append(f"cos θ = {show_plain(cosine)}, θ = {decimal(sp.acos(cosine) * 180 / sp.pi, 2)}°")
-        steps = [f"Tangent at t = {show_plain(t)}: {show_vector(velocity.subs(T, t))}" for t in times]
+        steps += [f"Tangent at t = {show_plain(t)}: {show_vector(velocity.subs(T, t))}" for t in times]
+        steps.append(f"cos θ = (a·b) ÷ (|a||b|) = ({show_plain(a.dot(b))}) ÷ (({show_plain(a.norm())})({show_plain(b.norm())})) = {show_plain(cosine)}")
     return Result("Unit tangent", answer, steps)
 
 
@@ -439,7 +571,9 @@ def surfaces_angle(first, second, at):
         normals.append(_grad(left - right).subs(dict(zip(XYZ, at))))
     cosine = sp.simplify(normals[0].dot(normals[1]) / (normals[0].norm() * normals[1].norm()))
     return Result("Angle between surfaces", [f"cos θ = {show_plain(cosine)}", f"θ = {decimal(sp.acos(cosine) * 180 / sp.pi, 2)}°"],
-                  [f"Normal {n + 1} = {show_vector(v)}" for n, v in enumerate(normals)])
+                  ["The angle between two surfaces is the angle between their normals, and grad f is a normal",
+                   *[f"Normal {n + 1}, grad f at the point: {show_vector(v)}, of size {show_plain(v.norm())}" for n, v in enumerate(normals)],
+                   f"cos θ = (n1·n2) ÷ (|n1||n2|) = ({show_plain(normals[0].dot(normals[1]))}) ÷ (({show_plain(normals[0].norm())})({show_plain(normals[1].norm())})) = {show_plain(cosine)}"])
 
 
 # ---------- integrals ----------
@@ -467,9 +601,17 @@ def integral(text):
             raise ValueError("This integral has no simple exact form")
         number = _numeric_integral(expression)
         guess = sp.nsimplify(number, [sp.pi, sp.sqrt(2)], tolerance=1e-10)
-        return Result("Definite integral", [f"≈ {decimal(number, 6)}"], [f"Worked out numerically. It looks like {show_plain(guess)}"])
+        return Result("Definite integral", [f"≈ {decimal(number, 6)}"], [f"The integral: {show(expression)}", "No exact formula for it could be found in time, so the area is added up numerically",
+                                                                          f"That gives {decimal(number, 6)}, which looks like {show_plain(guess)}"])
     value = sp.simplify(value)
-    return Result("Integral", [show(value)], [])
+    return Result("Integral", [show(value)], explain_integral(expression, value))
+
+
+def _derivatives_as_written(expression):
+    """∂u/∂x for SymPy's Derivative(u, x)."""
+    text = re.sub(r"Derivative\((\w+), \((\w+), (\d)\)\)", r"∂^\3\1/∂\2^\3", show(expression))
+    text = re.sub(r"Derivative\((\w+), (\w+), (\w+)\)", r"∂²\1/∂\2∂\3", text)
+    return re.sub(r"Derivative\((\w+), (\w+)\)", r"∂\1/∂\2", text)
 
 
 def prove(statement, where=None):
@@ -477,14 +619,17 @@ def prove(statement, where=None):
     statement = re.sub(r"\bd([a-z])/d([a-z])\b", r"∂\1/∂\2", statement)
     left, right = read_equation(statement)
     difference = left - right
-    steps = []
+    steps = [f"Left side: {_derivatives_as_written(left)}", f"Right side: {_derivatives_as_written(right)}"]
     if where:
         name, body = where.split("=", 1)
         difference = difference.subs(sp.Symbol(name.strip()), read_expression(body))
+        steps.append(f"Put in {name.strip()} = {show(read_expression(body))}")
     difference = difference.doit()
+    steps.append(f"Work out the derivatives in left side minus right side: {show(difference)}")
     simplified = time_limited(lambda: sp.simplify(difference), 30)
+    steps.append(f"Simplify: {show(simplified)}")
     if simplified == 0:
-        return Result("Proof by working both sides", ["True: both sides are equal"], ["Left side minus right side simplifies to 0"])
+        return Result("Proof by working both sides", ["True: both sides are equal"], steps + ["The difference is 0, so the two sides are equal"])
     letters = list(simplified.free_symbols)
     if not letters:
         close = abs(float(sp.N(simplified))) < 1e-9
@@ -492,5 +637,5 @@ def prove(statement, where=None):
     test = {s: sp.Rational(3 + n, 7 + 2 * n) for n, s in enumerate(letters)}
     close = abs(complex(sp.N(simplified.subs(test)))) < 1e-9
     if close:
-        return Result("Proof by working both sides", ["True at the test values, though the algebra did not fully simplify"], [f"Test values: {test}"])
+        return Result("Proof by working both sides", ["True at the test values, though the algebra did not fully simplify"], steps + [f"Test values: {test}. There the difference comes to 0"])
     return Result("Proof by working both sides", [f"False: the two sides differ by {show(simplified)}"], steps)

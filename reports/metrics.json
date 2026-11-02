@@ -1,14 +1,15 @@
 {
-  "test_accuracy": 0.9066,
-  "expression_accuracy": 0.7533,
+  "test_accuracy": 0.9004,
+  "expression_accuracy": 0.6767,
   "images": {
-    "BHMSDS": 25500,
-    "MNIST": 30000,
-    "EMNIST letters": 75000,
-    "drawn": 45000,
-    "train": 140400,
-    "validation": 17550,
-    "test": 17550
+    "BHMSDS": 22950,
+    "EMNIST ByClass": 147411,
+    "HASYv2": 21093,
+    "MathWriting+": 241091,
+    "drawn": 8000,
+    "train": 421398,
+    "validation": 33868,
+    "test": 49513
   },
   "epochs_run": 15
 }
