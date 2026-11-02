@@ -30,6 +30,82 @@ def test_normalize_ignores_pen_width():
     assert np.abs(normalize(thin) - normalize(thick)).mean() < 0.03
 
 
+def test_normalize_survives_a_round_blob_that_thinning_wears_away():
+    for radius in (3, 8, 20, 40):
+        mask = np.zeros((120, 120), np.uint8)
+        cv2.circle(mask, (60, 60), radius, 255, -1)
+        assert normalize(mask).max() > 0
+
+
+def test_normalize_survives_a_long_thin_line_that_fades_when_shrunk():
+    mask = np.zeros((420, 2000), np.uint8)
+    cv2.line(mask, (10, 200), (1990, 200), 255, 3)
+    assert normalize(mask).max() > 0
+
+
+def test_real_equals_signs_lean_and_differ_in_width():
+    mask, layers = _pen([[(100, 100), (160, 200)], [(250, 100), (250, 200)],  # tall strokes beside it, as on any real line
+                         [(300, 140), (330, 150)], [(295, 170), (345, 176)]], width=5)
+    symbols = segment(mask, layers)
+    assert [s["kind"] for s in symbols] == [None, None, "="]
+
+
+def test_something_touching_a_fraction_bar_is_not_part_of_it():
+    mask, layers = _pen([[(100, 100), (120, 170)], [(60, 175), (180, 175)], [(100, 180), (120, 250)]], width=5)  # top and bottom both touch the bar
+    assert len(segment(mask, layers)) == 3
+
+
+def test_the_top_bar_of_a_5_has_one_side_only_and_stays_on_it():
+    mask, layers = _pen([[(100, 100), (160, 100)], [(105, 112), (102, 150), (140, 150), (150, 190), (100, 200)]], width=5)
+    assert len(segment(mask, layers)) == 1
+
+
+def test_a_digit_touching_the_bar_of_a_root_stays_a_digit():
+    root = [(40, 200), (60, 180), (90, 280), (120, 100), (330, 100)]
+    digit = [(160, 104), (200, 104), (200, 180), (160, 180), (160, 240), (200, 240)]
+    mask, layers = _pen([root, digit], width=5)
+    assert len(segment(mask, layers)) == 2
+
+
+def test_a_limit_touching_a_tall_integral_stays_apart():
+    sign = [(120, 60), (100, 70), (90, 150), (80, 300), (60, 310)]
+    limit = [(92, 280), (120, 280), (120, 320), (92, 320), (92, 280)]
+    mask, layers = _pen([sign, limit], width=5)
+    assert len(segment(mask, layers)) == 2
+
+
+def test_a_tap_with_a_thin_pen_is_a_dot_but_stray_pixels_are_not():
+    mask, layers = _pen([[(100, 100), (100, 180)], [(100, 198), (101, 198)]], width=3)
+    assert len(segment(mask, layers)) == 1  # a ! keeps its dot
+    assert len(segment(mask)) == 2 or segment(mask)[0]["box"][3] < 100  # from pixels alone so small a mark may be a speck
+
+
+def test_a_dot_a_little_to_one_side_of_a_stem_joins_it_but_a_decimal_point_does_not():
+    mask, layers = _pen([[(100, 100), (100, 180)], [(110, 198), (111, 198)]], width=5)
+    assert len(segment(mask, layers)) == 1  # a ! with its dot off to the right
+    mask, layers = _pen([[(100, 100), (100, 180)], [(114, 176), (115, 176)], [(140, 100), (140, 180)]], width=5)
+    assert len(segment(mask, layers)) == 3  # 1.1
+
+
+def test_a_curly_x_with_a_gap_is_one_symbol_but_tall_brackets_are_two():
+    left = [(100, 100), (125, 125), (130, 150), (125, 175), (100, 200)]
+    right = [(170, 100), (145, 125), (140, 150), (145, 175), (170, 200)]
+    mask, layers = _pen([left, right], width=5)
+    assert len(segment(mask, layers)) == 1
+    tall_left = [(100, 40), (135, 90), (145, 150), (135, 210), (100, 260)]
+    tall_right = [(190, 40), (160, 90), (155, 150), (160, 210), (190, 260)]
+    digit = [(30, 110), (30, 190)]
+    other = [(250, 110), (250, 190)]
+    third = [(290, 110), (290, 190)]
+    mask, layers = _pen([digit, tall_left, tall_right, other, third], width=5)
+    assert len(segment(mask, layers)) == 5
+
+
+def test_a_stem_with_an_arm_against_its_side_is_one_symbol():
+    mask, layers = _pen([[(100, 100), (100, 220)], [(140, 130), (100, 170), (140, 215)]], width=5)  # a k
+    assert len(segment(mask, layers)) == 1
+
+
 def _poly(mask, points):
     cv2.polylines(mask, [np.array(points, np.int32)], False, 255, 12)
 
@@ -167,6 +243,25 @@ def test_stroke_masks_gives_up_when_it_cannot_match_the_board():
     assert stroke_masks([{**pen, "scaleX": 1.5}], board) is None             # stretched with the Move tool
     assert stroke_masks([{"type": "circle", "left": 1, "top": 1}], board) is None
     assert stroke_masks([pen], np.zeros((420, 680), np.uint8)) is None        # strokes that are not what the board shows
+
+
+def test_a_real_wide_x_written_as_two_arcs_stays_one_symbol():
+    """2x+5=3 traced from a real board. Its x is two arcs back to back that touch, and it is wider than it is tall."""
+    two = [(75, 74), (90, 50), (110, 25), (120, 12), (130, 10), (140, 15), (152, 30), (150, 50), (140, 65), (125, 85), (115, 100), (105, 107), (85, 118), (120, 115), (140, 117), (160, 124), (183, 130)]
+    arc_left = [(187, 70), (200, 68), (215, 63), (240, 62), (252, 68), (262, 78), (265, 88), (260, 95), (245, 103), (225, 112), (210, 120), (192, 122)]
+    arc_right = [(302, 70), (292, 66), (283, 67), (270, 75), (256, 83), (250, 92), (255, 100), (280, 118), (300, 130), (320, 138), (332, 138), (338, 134)]
+    plus_bar, plus_stem = [(338, 88), (360, 82), (380, 80), (415, 81), (435, 82)], [(368, 42), (372, 60), (372, 80), (375, 110), (378, 140)]
+    five_top = [(468, 82), (468, 40), (462, 15), (490, 12), (520, 14), (555, 8)]
+    five_body = [(470, 75), (480, 62), (495, 57), (510, 70), (530, 90), (535, 100), (520, 112), (490, 125), (450, 125), (440, 118)]
+    equals_top, equals_low = [(586, 62), (595, 58), (625, 58)], [(590, 93), (605, 88), (625, 80), (635, 79)]
+    three = [(702, 14), (712, -5), (735, -15), (755, -8), (765, 15), (765, 30), (745, 50), (720, 62), (700, 68), (680, 73), (665, 74), (720, 65), (750, 72), (770, 90), (775, 100), (760, 115), (735, 135), (700, 148), (682, 148), (678, 138)]
+    strokes = [two, arc_left, arc_right, plus_bar, plus_stem, five_top, five_body, equals_top, equals_low, three]
+    mask, masks = _pen([[(round(x * 0.803), round((y + 40) * 0.803)) for x, y in stroke] for stroke in strokes], width=6)
+    symbols = sorted(segment(mask, masks), key=lambda s: s["box"][0])
+    assert len(symbols) == 6                                # 2, x, +, 5, the equals sign and 3
+    x_box = symbols[1]["box"]
+    assert x_box[2] > x_box[3]                              # the x took both arcs, so it is wider than tall
+    assert symbols[4]["kind"] == "="
 
 
 def test_stroke_masks_draw_as_wide_as_the_canvas():

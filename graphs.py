@@ -49,7 +49,13 @@ def chromatic(text, colours=None):
     answer = [f"P(λ) = {show(poly)}", f"Chromatic number = {number}"]
     if colours:
         answer.append(f"With {colours} colours: {poly.subs(LAM, colours)} proper colourings")
-    return Result("Graph colouring", answer, [f"{graph.number_of_nodes()} vertices, {graph.number_of_edges()} edges", "P(G) = P(G - e) - P(G / e)"])
+    values = [(k, poly.subs(LAM, k)) for k in range(1, number + 1)]
+    steps = [f"{graph.number_of_nodes()} vertices, {graph.number_of_edges()} edges",
+             "Deletion and contraction: P(G) = P(G - e) - P(G / e), repeated until no edges are left, where P = λ^(number of vertices)", f"That gives P(λ) = {show(poly)}",
+             "Try small numbers of colours: " + ", ".join(f"P({k}) = {v}" for k, v in values), f"The first number with a colouring is {number}, so that is the chromatic number"]
+    if colours:
+        steps.append(f"With {colours} colours, put λ = {colours}: {poly.subs(LAM, colours)}")
+    return Result("Graph colouring", answer, steps)
 
 
 def planarity(text):
@@ -62,7 +68,7 @@ def planarity(text):
         if nx.is_connected(graph):
             r = e - v + 2
             answer.append(f"Regions: r = e - v + 2 = {r}")
-            steps.append(f"Euler's formula: {v} - {e} + {r} = 2")
+            steps.append(f"Euler's formula: v - e + r = 2, so r = e - v + 2 = {e} - {v} + 2 = {r}")
     else:
         answer = ["The graph is not planar"]
         if e > 3 * v - 6:
@@ -78,13 +84,21 @@ def regions(text):
     if sum(degrees) % 2:
         raise ValueError("The degrees must add up to an even number")
     v, e = len(degrees), sum(degrees) // 2
-    return Result("Euler's formula", [f"Regions: r = {e - v + 2}"], [f"Sum of degrees = 2e, so e = {e}", f"v - e + r = 2 with v = {v}"])
+    return Result("Euler's formula", [f"Regions: r = {e - v + 2}"], [f"Sum of degrees = {sum(degrees)} = 2e, so e = {e}", f"There are v = {v} vertices", f"Euler's formula: v - e + r = 2, so r = e - v + 2 = {e} - {v} + 2 = {e - v + 2}"])
 
 
 def isomorphic(first, second):
     a, b = read_graph(first), read_graph(second)
     same = nx.is_isomorphic(a, b)
-    steps = [f"Degrees: {sorted(d for _, d in a.degree())} and {sorted(d for _, d in b.degree())}"]
+    steps = [f"Vertices: {a.number_of_nodes()} and {b.number_of_nodes()}. Edges: {a.number_of_edges()} and {b.number_of_edges()}", f"Degrees: {sorted(d for _, d in a.degree())} and {sorted(d for _, d in b.degree())}"]
+    if same:
+        matcher = nx.isomorphism.GraphMatcher(a, b)
+        matcher.is_isomorphic()
+        steps.append("Every edge is kept when the vertices are matched: " + ", ".join(f"{u} → {v}" for u, v in matcher.mapping.items()))
+    elif sorted(d for _, d in a.degree()) != sorted(d for _, d in b.degree()):
+        steps.append("The degrees differ, and an isomorphism must keep degrees")
+    else:
+        steps.append("The counts agree, but no matching of the vertices keeps every edge")
     return Result("Isomorphism", ["The graphs are isomorphic" if same else "The graphs are not isomorphic"], steps)
 
 
@@ -97,7 +111,9 @@ def spanning_trees(text, show_count=4):
         found.append(", ".join(f"{u}-{v}" for u, v in tree.edges()))
         if len(found) == show_count:
             break
-    return Result("Spanning trees", [f"Number of spanning trees = {count}"] + [f"Tree {n + 1}: {edges}" for n, edges in enumerate(found)], ["Kirchhoff's matrix-tree theorem"])
+    return Result("Spanning trees", [f"Number of spanning trees = {count}"] + [f"Tree {n + 1}: {edges}" for n, edges in enumerate(found)], ["Kirchhoff's matrix-tree theorem: form the Laplacian, with degrees on the diagonal and -1 for each edge",
+                   "\n".join(["Laplacian:"] + ["[ " + "  ".join(f"{int(v):>2}" for v in row) + " ]" for row in laplacian]),
+                   f"Remove one row and the same column, and take the determinant: {count}"])
 
 
 def _edge_text(a, b):
@@ -123,7 +139,9 @@ def prim(text, start=None):
     if len(seen) != graph.number_of_nodes():
         raise ValueError("The graph is not connected, so it has no spanning tree")
     return Result("Prim's algorithm", [f"Minimal spanning tree weight = {total:g}", "Edges: " + ", ".join(_edge_text(a, b) for a, b, _ in chosen)],
-                  [f"Step {n + 1}: add {_edge_text(a, b)} (weight {w:g})" for n, (a, b, w) in enumerate(chosen)])
+                  [f"Start at {root}. Each time, add the lightest edge from the tree to a new vertex",
+                   *[f"Step {n + 1}: add {_edge_text(a, b)} (weight {w:g})" for n, (a, b, w) in enumerate(chosen)],
+                   f"Add the weights: {' + '.join(f'{w:g}' for _, _, w in chosen)} = {total:g}"])
 
 
 def kruskal(text):
@@ -148,7 +166,9 @@ def kruskal(text):
         steps.append(f"Add {_edge_text(a, b)} (weight {w:g})")
     if len(chosen) != graph.number_of_nodes() - 1:
         raise ValueError("The graph is not connected, so it has no spanning tree")
-    return Result("Kruskal's algorithm", [f"Minimal spanning tree weight = {total:g}", "Edges: " + ", ".join(_edge_text(a, b) for a, b in chosen)], steps)
+    weights = [graph[a][b]["weight"] for a, b in chosen]
+    return Result("Kruskal's algorithm", [f"Minimal spanning tree weight = {total:g}", "Edges: " + ", ".join(_edge_text(a, b) for a, b in chosen)],
+                  ["Take the edges from lightest to heaviest, keeping each one that makes no cycle", *steps, f"Add the weights: {' + '.join(f'{w:g}' for w in weights)} = {total:g}"])
 
 
 def huffman(frequencies):
@@ -173,6 +193,8 @@ def huffman(frequencies):
         next_id += 1
     length = sum(frequencies[s] * len(codes[s]) for s in frequencies)
     answer = [f"{s}: {codes[s]}" for s in frequencies] + [f"Total weighted length = {length:g}"]
+    steps = ["Keep merging the two smallest weights, with 0 on one branch and 1 on the other", *steps, "Read each code from the top of the tree down to the symbol",
+             "Weighted length = Σ weight × code length: " + " + ".join(f"{frequencies[s]:g}×{len(codes[s])}" for s in frequencies) + f" = {length:g}"]
     return Result("Optimal prefix code (Huffman)", answer, steps)
 
 
@@ -205,7 +227,7 @@ def merge_sort(values):
         return merged
 
     result = run(list(values))
-    return Result("Merge sort", [str(result)], steps)
+    return Result("Merge sort", [str(result)], [f"Split {list(values)} in half again and again, then merge the sorted halves back, smallest first", *steps])
 
 
 def tree_leaves(text):
@@ -216,13 +238,14 @@ def tree_leaves(text):
     inner = sum(int(c) for _, c in pairs)
     degree_sum = sum(int(d) * int(c) for d, c in pairs)
     leaves = degree_sum - 2 * inner + 2
-    return Result("Leaves of a tree", [f"Leaves = {leaves}"], [f"Sum of degrees = 2(n - 1): {degree_sum} + L = 2({inner} + L - 1)"])
+    return Result("Leaves of a tree", [f"Leaves = {leaves}"], [f"The vertices that are not leaves number {inner}, and their degrees add up to {degree_sum}", "A tree with n vertices has n - 1 edges, so its degrees add up to 2(n - 1), with n = inner vertices + L leaves, each leaf of degree 1",
+                                                     f"{degree_sum} + L = 2({inner} + L - 1)", f"Solve for L: L = {degree_sum} - 2 × {inner} + 2 = {leaves}"])
 
 
 def extension_cords(devices, outlets):
     """Cords with m outlets forming an m-ary tree: internal nodes = (leaves - 1)/(m - 1)."""
     cords = sp.ceiling(sp.Rational(devices - 1, outlets - 1))
-    return Result("m-ary tree", [f"{cords} extension cords"], [f"Internal nodes = (leaves - 1)/(m - 1) = ({devices} - 1)/({outlets} - 1)"])
+    return Result("m-ary tree", [f"{cords} extension cords"], [f"Each cord is an inner node with {outlets} branches, and the {devices} devices are the leaves", f"Internal nodes = (leaves - 1)/(m - 1) = ({devices} - 1)/({outlets} - 1) = {show(sp.Rational(devices - 1, outlets - 1))}", f"Round up to whole cords: {cords}"])
 
 
 def walk_kind(text):
@@ -237,18 +260,21 @@ def walk_kind(text):
         kind = "a cycle" if trail and path and edges else "a circuit" if trail and edges else "a closed walk"
     else:
         kind = "a path" if trail and path else "a trail" if trail else "an open walk"
-    return Result("Nature of a walk", [f"This is {kind}"], [f"Vertices: {' '.join(vertices)}", f"Edges: {' '.join(edges)}", f"Length: {len(edges)}"])
+    return Result("Nature of a walk", [f"This is {kind}"], [f"Vertices: {' '.join(vertices)}", f"Edges: {' '.join(edges)}", f"Length: {len(edges)}",
+                                                           f"It {'ends where it starts' if closed else 'ends away from its start'}, so it is {'closed' if closed else 'open'}",
+                                                           f"Edges {'do not repeat' if trail else 'repeat'} and vertices {'do not repeat' if path else 'repeat'}, so this is {kind}"])
 
 
 def summary(text):
     graph = read_graph(text)
     degrees = dict(graph.degree())
     answer = [f"{graph.number_of_nodes()} vertices, {graph.number_of_edges()} edges", "Degrees: " + ", ".join(f"{v}: {d}" for v, d in sorted(degrees.items(), key=lambda p: str(p[0])))]
-    return Result("Graph summary", answer, [])
+    return Result("Graph summary", answer, [f"Count the vertices and edges: v = {graph.number_of_nodes()}, e = {graph.number_of_edges()}", "The degree of a vertex is the number of edges at it",
+                                            f"Check: the degrees add up to {sum(degrees.values())}, which is 2e"])
 
 
 def euler_check(v, e, r):
-    return Result("Euler's formula", [f"v - e + r = {v - e + r}" + (", which is 2, so the formula holds" if v - e + r == 2 else ", which is not 2")], [])
+    return Result("Euler's formula", [f"v - e + r = {v - e + r}" + (", which is 2, so the formula holds" if v - e + r == 2 else ", which is not 2")], [f"Put in the numbers: {v} - {e} + {r} = {v - e + r}", "A connected planar graph must give 2"])
 
 
 def parts(text):

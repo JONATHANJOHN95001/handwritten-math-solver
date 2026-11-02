@@ -17,7 +17,8 @@ MAIN_LINE = (WORD_ONLY - set("yztabckmnpd")) | {"arrow", "inf"}  # → and ∞ o
 CHECKED = set("yztabckmnpd") | {"integral", "sqrt", "pi", "lbracket", "rbracket", "partial", "fact", "lambda", "mu", "theta"}
 ALONE_MARGIN = 4
 BRACKETS = {"lparen", "rparen"}
-STEM = {"1": 0.42, "l": 0.31, "i": 0.27}  # how the CNN splits its belief for a plain straight stroke
+ROOT_OVERLAP = 0.3         # a symbol is under a root when at least this much of its width is below the bar: the last digit often sticks out
+STEM = {"1": 0.83, "l": 0.15, "i": 0.02}  # how the CNN splits its belief for a plain straight stroke
 COMMA_LOOKALIKES = {"1", "l", "i", "j", "slash", "lparen", "rparen", "minus", "fact"}
 TOKENS = {"plus": "+", "minus": "-", "slash": "÷", "lparen": "(", "rparen": ")", "arrow": "→", "inf": "∞", "integral": "∫", "sqrt": "√",
           "pi": "π", "lbracket": "[", "rbracket": "]", "partial": "∂", "fact": "!", "lambda": "λ", "mu": "μ", "theta": "θ"}
@@ -37,6 +38,8 @@ def to_text(symbols, labels):
         if s["kind"] is None:
             _trust_the_shape(s, labels)
             item["p"] = dict(zip(labels, (float(v) for v in s["probs"])))
+            if "forced" in s:  # the writer's own choice of this symbol: no rule about what may stand here applies
+                item["forced"] = s["forced"]
         items.append(item)
     lines = [_parse(row) for row in _rows(items)]
     text = "; ".join(line for line in lines if line)
@@ -155,16 +158,23 @@ def _matrices(items):
             continue
         inside = [it for it in items if left["x1"] <= _cx(it) <= right["x0"] and left["y0"] <= _cy(it) <= left["y1"]]
         rows = _matrix_rows(inside)
-        if len(rows) < 2:
+        cells = [_cells(row, inside) for row in rows]
+        if len(rows) < 2 or len({len(row) for row in cells}) > 1 or not _rows_fill_brackets(rows, left):
             continue
         for s in left["source"]:
             s["read_as"] = "["
         for s in right["source"]:
             s["read_as"] = "]"
-        cells = [",".join(_line(cell, flat=True) for cell in _cells(row, inside)) for row in rows]
-        group = _merge([left, right, *inside], text="[" + ",".join(f"[{row}]" for row in cells) + "]")
+        text = ",".join("[" + ",".join(_line(cell, flat=True) for cell in row) + "]" for row in cells)
+        group = _merge([left, right, *inside], text=f"[{text}]")
         return _without(items, [left, right, *inside]) + [group]
     return items
+
+
+def _rows_fill_brackets(rows, bracket):
+    """In a matrix the first row is high between the brackets and the last low. A line with a power above it sits in the middle."""
+    centre = lambda row: sum(_cy(it) for it in row) / len(row)
+    return (centre(rows[0]) < bracket["y0"] + 0.4 * _h(bracket) and centre(rows[-1]) > bracket["y0"] + 0.6 * _h(bracket))
 
 
 def _matrix_rows(inside):
@@ -225,7 +235,8 @@ def _spot_derivative(top, bottom):
 def _roots(items):
     """A square root with a bar over symbols: √(what is under the bar)."""
     for root in (it for it in items if it["kind"] is None and _best(it["p"]) == "sqrt"):
-        under = [it for it in items if it is not root and root["x0"] + 0.2 * _w(root) <= _cx(it) <= root["x1"] and root["y0"] <= _cy(it) <= root["y1"]]
+        under = [it for it in items if it is not root and root["x0"] + 0.2 * _w(root) <= _cx(it) and it["x0"] <= root["x1"] - ROOT_OVERLAP * _w(it)
+                 and root["y0"] <= _cy(it) <= root["y1"]]
         if under:
             for s in root["source"]:
                 s["read_as"] = "√"
@@ -277,6 +288,7 @@ def _words(items):
             for it, letter in zip(run, word):
                 for s in it["source"]:
                     s["read_as"] = letter
+                    s["in_word"] = True
             items = _without(items, run)
             items.insert(i, _merge(run, text=word, word=word))
         i += 1
@@ -372,6 +384,25 @@ def _takes_subscript(piece):
     return it.get("word") == "log" or (it["kind"] is None and len(text) == 1 and text in ALL_LETTERS | {"x"} and text != "e")
 
 
+def _is_raised(piece, it, height):
+    """A power measured against what it follows, as people's lines drift: well above the base, and ending above its middle."""
+    base = piece[0]
+    if piece[1] in (",", ".", "·") or _h(base) < 0.4 * height or _h(it) > 1.1 * _h(base) or it["kind"] == "=":
+        return False
+    if it["kind"] is None and _best(it["p"]) in ("plus", "minus"):  # + and − sit at mid-height, which is high beside a small x
+        return False
+    return _cy(it) < base["y0"] + 0.3 * _h(base) and it["y1"] < base["y0"] + 0.7 * _h(base)
+
+
+def _is_low_subscript(piece, it, least_height):
+    """A subscript measured against its letter: low on it and reaching below it. The x of dx sits on the same line as its tall d."""
+    base = piece[0]
+    if piece[1] == "e" or not _takes_subscript(piece) or base.get("word"):
+        return False
+    return (_cy(it) > base["y0"] + 0.65 * _h(base) and it["y1"] > base["y1"] + 0.1 * _h(base)
+            and least_height * _h(base) <= _h(it) < 0.9 * _h(base))
+
+
 def _line(items, banned=MAIN_LINE, flat=False):
     """Left to right along the line; small symbols high on the line are a power, low after 'log' or a letter its base or subscript.
 
@@ -384,6 +415,9 @@ def _line(items, banned=MAIN_LINE, flat=False):
     pieces = []  # [base item, its text, power items, base items]
     for it in items:
         if it.get("small_stroke") and pieces and not flat and _stroke_like(it):
+            if _is_low_subscript(pieces[-1], it, 0.45):  # a 1 written low after a letter is long; a comma is short
+                pieces[-1][3].append(it)
+                continue
             if _cy(it) > top + 0.6 * height and _h(it) < 0.6 * height:  # low: a comma
                 pieces.append([it, ",", [], []])
                 continue
@@ -393,10 +427,10 @@ def _line(items, banned=MAIN_LINE, flat=False):
                     s["read_as"] = "'"
                 continue
         if pieces and it["kind"] != "dot" and not flat:
-            if _cy(it) < top + 0.3 * height and it["y1"] < top + 0.65 * height:
+            if (_cy(it) < top + 0.3 * height and it["y1"] < top + 0.65 * height) or _is_raised(pieces[-1], it, height):
                 pieces[-1][2].append(it)
                 continue
-            if _takes_subscript(pieces[-1]) and _cy(it) > bottom - 0.3 * height and _h(it) < 0.7 * height:
+            if _is_low_subscript(pieces[-1], it, 0) or (pieces[-1][0].get("word") == "log" and _cy(it) > bottom - 0.3 * height and _h(it) < 0.7 * height):
                 pieces[-1][3].append(it)
                 continue
         if it["kind"] == "dot":  # low on the line a decimal point, at mid-height times

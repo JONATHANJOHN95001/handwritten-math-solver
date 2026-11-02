@@ -16,6 +16,7 @@ import matrices
 import probability
 from results import Result, parts_of, read_matrix, read_numbers, time_limited
 from solver import describe, read_expression, solve
+from working import explain
 
 MATRIX = r"(\[.*\])"
 
@@ -275,7 +276,7 @@ def _plain(text):
         raise ValueError("I could not understand this question. Try writing it as a formula, or in the wording your paper uses")
     answer = solve(text)
     kind = "Equation" if answer.solutions is not None else "Calculation"
-    return Result(kind, [describe(answer)], parsed=answer.parsed)
+    return Result(kind, [describe(answer)], explain(text, answer), parsed=answer.parsed)
 
 
 def _dispatch(text):

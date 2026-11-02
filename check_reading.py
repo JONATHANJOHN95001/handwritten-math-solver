@@ -4,7 +4,7 @@ Each kind of expression is glued together from test images the CNN never trained
 A read counts only when the whole line comes out exactly right. Writes reports/reading_check.json and
 refreshes the whole-sum score in reports/metrics.json.
 
-Usage: python check_reading.py --bhmsds <folder>/bhmsds/symbols --emnist <folder with emnist-letters-*.gz>
+Usage: python check_reading.py --data <folder made by prepare_handwriting.py>
 """
 import argparse
 import json
@@ -16,7 +16,7 @@ import tensorflow as tf
 
 from layout import MAIN_LINE, to_text
 from reader import segment
-from train import CLASSES, HERE, SEED, expression_check, load_split
+from train import CLASSES, HERE, SEED, expression_check, load_test
 
 TILE, SMALL = 112, 56  # a 28x28 test image drawn at about the size people write; powers and scripts at half that
 TOP = 150              # top of the main line's tiles (the ink starts 1/7 of a tile lower)
@@ -197,11 +197,10 @@ def read(mask, model):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bhmsds", required=True)
-    ap.add_argument("--emnist", required=True)
+    ap.add_argument("--data", required=True)
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
-    _, _, _, (x_test, y_test) = load_split(args.bhmsds, args.emnist)
+    x_test, y_test = load_test(args.data)
     model = tf.keras.models.load_model(HERE / "models" / "symbol_cnn.keras")
     by_class = [x_test[y_test == c] for c in range(len(CLASSES))]
 

@@ -353,6 +353,17 @@ def _parse_side(tokens, natural_log=False, unevaluated=True):
     return expr
 
 
+def read_as_written(text):
+    """Each side of a line, read but not worked out. Raises ValueError if it cannot be read."""
+    sides = [[]]
+    for tok in tokenize(text.strip().rstrip("=")):
+        if tok == ("op", "="):
+            sides.append([])
+        else:
+            sides[-1].append(tok)
+    return [_parse_side(side) for side in sides]
+
+
 def read_expression(text, natural_log=True):
     """A SymPy expression from text, for the course methods. Here x is always a letter and log is the natural log."""
     return _parse_side(tokenize(text, plain=False), natural_log, unevaluated=False)

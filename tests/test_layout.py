@@ -134,6 +134,44 @@ def test_matrix_with_negative_entries():
     assert to_text([left, right] + cells, LABELS) == "[[-1,3],[-2,4]]"
 
 
+def test_power_measured_against_its_base_when_the_line_is_taller_than_it():
+    symbols = [sym(0, "4", y=0, h=100), sym(50, "x", y=40, h=60), sym(95, "3", y=10, w=20, h=45), sym(130, "plus", y=50, h=40), sym(180, "y", y=40, h=90)]
+    assert to_text(symbols, LABELS) == "4x^3+y"
+
+
+def test_plus_and_minus_at_mid_height_are_not_a_power_of_a_small_letter():
+    symbols = [sym(0, "2"), sym(50, "x", y=40, h=60), sym(110, "minus", y=45, h=8), sym(160, "5")]
+    assert to_text(symbols, LABELS) == "2x-5"
+
+
+def test_the_x_of_dx_is_not_a_subscript_of_the_tall_d():
+    symbols = [sym(0, "x", y=40, h=60), sym(50, "d", y=0, h=100), sym(95, "x", y=40, h=60)]
+    assert to_text(symbols, LABELS) == "xdx"
+
+
+def test_a_long_1_low_after_a_letter_is_a_subscript_and_a_short_mark_a_comma():
+    stroke = sym(45, "1", y=60, w=8, h=38)
+    stroke["small_stroke"] = True
+    assert to_text([sym(0, "x", y=20, h=60), stroke], LABELS) == "x_1"
+    comma = sym(45, "1", y=75, w=6, h=20)
+    comma["small_stroke"] = True
+    assert to_text([sym(0, "x", y=20, h=60), comma, sym(70, "y", y=20, h=60)], LABELS) == "x,y"
+
+
+def test_brackets_round_a_line_with_a_power_are_not_a_matrix():
+    first = [sym(0, "lparen", y=0, w=25, h=130), sym(35, "x", y=40, h=60), sym(85, "plus", y=45, h=40), sym(135, "2", y=40, h=60),
+             sym(185, "rparen", y=15, w=25, h=90), sym(215, "3", y=-30, w=20, h=40)]  # that ) is too short to count as tall
+    second = [sym(245, "lparen", y=0, w=25, h=130), sym(280, "x", y=40, h=60), sym(330, "plus", y=45, h=40), sym(380, "5", y=40, h=60),
+              sym(430, "rparen", y=0, w=25, h=130)]
+    assert to_text(first + second, LABELS) == "(x+2)^3(x+5)"
+
+
+def test_brackets_round_subscripts_are_not_a_matrix():
+    symbols = [sym(0, "lbracket", y=0, w=20, h=200), sym(40, "1", y=20, w=20, h=60), sym(40, "3", y=120, w=30, h=60), sym(130, "4", y=120, w=30, h=60),
+               sym(220, "rbracket", y=0, w=20, h=200), sym(260, "5", y=60, w=30, h=60)]
+    assert not to_text(symbols, LABELS).startswith("[[")
+
+
 def test_integral_with_limits():
     sign = sym(0, "integral", y=0, w=30, h=200)
     limits = [sym(35, "1", y=0, w=14, h=40), sym(35, "0", y=165, w=25, h=40)]
@@ -193,3 +231,13 @@ def test_small_digit_after_log_is_its_base_not_a_comma():
     base = sym(130, "2", 0.99, y=80, w=30, h=40)
     base["small_stroke"] = True
     assert to_text(letters + [base, sym(170, "lparen"), sym(210, "8"), sym(250, "rparen")], LABELS) == "log_2(8)"
+
+
+def test_a_last_digit_sticking_out_past_the_root_bar_stays_under_it():
+    symbols = [sym(0, "sqrt", w=300, h=200), sym(100, "4", y=60, w=60), sym(270, "9", y=60, w=80)]
+    assert to_text(symbols, LABELS) == "√(49)"
+
+
+def test_a_symbol_past_the_root_bar_stays_outside():
+    symbols = [sym(0, "sqrt", w=200, h=200), sym(100, "4", y=60, w=60), sym(230, "plus", y=80, w=60, h=60), sym(310, "3", y=60, w=60)]
+    assert to_text(symbols, LABELS) == "√(4)+3"
